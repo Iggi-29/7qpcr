@@ -3,7 +3,7 @@
 ##########################################
 
 ### WD
-setwd("/home/labs/eclab/ijarne/Downloads")
+setwd("/home/labs/eclab/ijarne/Desktop/")
 
 ### libraries
 library(readr)
@@ -11,7 +11,7 @@ library(dplyr)
 library(purrr)
 
 ### Constants
-raw_data_file <- "./20251212_SPOCK1_DN-TRES.txt"
+raw_data_file <- "./7qpcr/raw_data_to_play/20251212_SPOCK1_DN-TRES.txt"
 
 ### Data importation
 raw_data <- readr::read_tsv(
