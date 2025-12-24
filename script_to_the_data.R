@@ -12,6 +12,8 @@ library(purrr)
 
 ### Constants
 raw_data_file <- "./7qpcr/raw_data_to_play/20251212_SPOCK1_DN-TRES.txt"
+samples_locations <- ""
+genes_locations <- ""
 
 ### Data importation
 raw_data <- readr::read_tsv(
@@ -214,52 +216,50 @@ raw_data <- raw_data %>%
   # Add the gene info
   dplyr::mutate(Gene = genes_location_df$gene[match(row_name, genes_location_df$row_name)]) %>% 
   dplyr::mutate(type_of_gene = ifelse(Gene %in% genes_housekeeping,"HK","Normal")) %>% 
-  # Add sample_name
-  dplyr::mutate(sample_name = sample_locations_df$sample[match(Pos, sample_locations_df$Pos)])
+  # Add replicate_name
+  dplyr::mutate(replicate_name = sample_locations_df$sample[match(Pos, sample_locations_df$Pos)])
 
 remove(genes_location_df);remove(sample_locations_df);remove(genes_housekeeping);remove(raw_data_files)
 
 raw_data <- raw_data %>% 
   dplyr::select(-c(row_name, col_name)) %>% 
-  dplyr::relocate(sample_name, .after = Pos) %>% 
-  dplyr::relocate(Gene, type_of_gene, .after = sample_name)
+  dplyr::relocate(replicate_name, .after = Pos) %>% 
+  dplyr::relocate(Gene, type_of_gene, .after = replicate_name)
 
 ########################################################
 ####                INICIAR LES DADES               ####
 ########################################################
 
-##### 1 remove sample_name NA
+##### 1 remove replicate_name NA and add sample_name information
 raw_data <- raw_data %>% 
-  dplyr::filter(!is.na(sample_name))
+  dplyr::filter(!is.na(replicate_name)) %>%
+  dplyr::rowwise() %>% 
+  dplyr::mutate(sample_name = gsub(pattern = "\\.[^.]*$", replacement = "", x = replicate_name)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::relocate(sample_name, .after = replicate_name)
 
 ##### 2 remove samples with HK35
 raw_data <- raw_data %>% 
-  group_by(sample_name) %>%
-  mutate(
-    good_sample = ifelse(
+  dplyr::group_by(replicate_name) %>%
+  dplyr::mutate(
+    good_replicate = ifelse(
       any(type_of_gene == "HK" & Cp >= 35, na.rm = TRUE),
       "bad","good")) %>% 
-  ungroup()
+  dplyr::ungroup()
 
 ##### 3 NAs to 35
 raw_data <- raw_data %>%
-  mutate(Cp = ifelse(is.na(Cp),35,Cp))
+  dplyr::mutate(Cp = ifelse(is.na(Cp),35,Cp))
 
 ##### 4 check for bad values
-# raw_data <- raw_data %>%
-#   group_by(sample_name, Gene) %>%
-#   mutate(good_value = ifelse(
-#     n() > 1 &
-#       abs(Cp - ((sum(Cp, na.rm = TRUE) - Cp) / (n() - 1))) > 0.5,"bad", "good")) %>%
-#   ungroup()
 raw_data <- raw_data %>%
-  group_by(sample_name, Gene) %>%
+  group_by(replicate_name, Gene) %>%
   mutate(
     comparison_results = map_chr(Cp, ~ {
       comps <- abs(.x - Cp) <= 0.5
       comps <- comps[!is.na(comps)]
       comps <- comps[-which(Cp == .x)[1]]  # remove self-comparison
-      
+
       paste0(ifelse(comps, "good", "bad"), collapse = ",")
     })
   ) %>%
@@ -270,7 +270,7 @@ raw_data <- raw_data %>%
 
 ##### 5 delta Ct calculatio
 # raw_data <- raw_data %>%
-#     dplyr::group_by(sample_name, Gene) %>%
+#     dplyr::group_by(replicate_name, Gene) %>%
 #     dplyr::mutate(
 #       n_good = sum(good_value == "good", na.rm = TRUE),
 #       mean_value = dplyr::case_when(
@@ -286,7 +286,7 @@ raw_data <- raw_data %>%
 
 ##### 6 delta delta CT value
 raw_data <- raw_data %>%
-  group_by(sample_name) %>%
+  group_by(replicate_name) %>%
   mutate(
     hk_mean_value = mean(mean_value[type_of_gene == "HK"],
                          na.rm = TRUE),
@@ -302,7 +302,7 @@ raw_data <- raw_data %>%
 
 ##### 6 mean of the CT
 raw_data <- raw_data %>%
-  dplyr::group_by(sample_name, Gene) %>%
+  dplyr::group_by(replicate_name, Gene) %>%
   dplyr::mutate(
     n_good = sum(good_value == "good", na.rm = TRUE),
     mean_value = dplyr::case_when(
@@ -318,7 +318,7 @@ raw_data <- raw_data %>%
 
 ##### 7 delta CT
 raw_data <- raw_data %>%
-  group_by(sample_name) %>%
+  group_by(replicate_name) %>%
   mutate(
     hk_mean_value = mean(mean_value[type_of_gene == "HK"],
                          na.rm = TRUE),
@@ -327,7 +327,7 @@ raw_data <- raw_data %>%
 
 ##### 8 Clean for Excel
 raw_data <- raw_data %>%
-  group_by(sample_name, Gene) %>%
+  group_by(replicate_name, Gene) %>%
   mutate(
     row_in_group = row_number(),
     mean_value   = ifelse(row_in_group == 1, mean_value, NA_real_),
@@ -336,7 +336,7 @@ raw_data <- raw_data %>%
   ) %>%
   ungroup() %>%
   select(-row_in_group) %>%
-  dplyr::arrange(sample_name,type_of_gene,Gene)
+  dplyr::arrange(replicate_name,type_of_gene,Gene)
 
 openxlsx::write.xlsx(file = "./final_excel_for_L.xlsx", x = raw_data)
 
