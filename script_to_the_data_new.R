@@ -72,6 +72,8 @@ genes_housekeeping <- c("RHOA")
 ## value for bad sample and bad value
 value_for_bad_replicate <- 35
 value_for_bad_value <- 0.5
+## permited dispersion at the sample level
+permited_dispersion <- 3
 
 ### Data importation
 ## raw txt data
@@ -243,9 +245,28 @@ sample_data <- raw_data %>%
   dplyr::mutate(elevated_value = 2^-delta_delta_CT) %>% 
   dplyr::select(-c(deltaCT_mean)) %>% 
   # check outliers of elevated value
-  dplyr::group_by(cell_line,sample_group,Gene) %>% 
-  dplyr::mutate(mean_value = mean(elevated_value),
-                sd_value = sd(elevated_value)) %>% 
+  dplyr::group_by(cell_line, sample_group, Gene) %>%
+  dplyr::mutate(
+    mean_others = map_dbl(seq_along(elevated_value), function(i) {
+      others <- elevated_value[-i]
+      if (length(others) >= 1) mean(others, na.rm = TRUE) else NA_real_
+    }),
+    sd_others = map_dbl(seq_along(elevated_value), function(i) {
+      others <- elevated_value[-i]
+      if (length(others) >= 2) sd(others, na.rm = TRUE) else NA_real_
+    }),
+    qc_flag = ifelse(
+      !is.na(sd_others) &
+        abs(elevated_value - mean_others) > permited_dispersion * sd_others,
+      "BAD",
+      "GOOD"
+    )
+  ) %>%
+  dplyr::ungroup() %>% 
+  # calculate the mean and sd values of good delta scores
+  dplyr::group_by(cell_line,sample_group,Gene) %>%
+  dplyr::mutate(mean_value = mean(elevated_value[qc_flag == "GOOD"]),
+                sd_value = sd(elevated_value[qc_flag == "GOOD"])) %>% 
   dplyr::ungroup()
 
 ##### 8 Clean for Excel and add deltaCT mean and deltaCT sd
@@ -262,9 +283,26 @@ sample_data <- sample_data %>%
 
 openxlsx::write.xlsx(file = "./results/raw_sample_data.xlsx", x = sample_data)
 
-##### 9 do the zscore calculations 
-clean_data_to_plot <- sample_data 
+##### 9 do the zscore calculations of deltaCT
+clean_data_to_plot_hmaps <- sample_data %>% 
+  # remove bad data and not useful columns
+  dplyr::select(-qc_flag) %>% 
+  dplyr::filter(!is.na(mean_value)) %>% 
+  dplyr::select(sample_name, cell_line,Gene, sample_group, mean_value) %>%
+  # calculate the zscore
+  dplyr::group_by(cell_line,Gene) %>% 
+  dplyr::mutate(z_scored_deltaCT = {
+    mean_val <- mean(mean_value)
+    sd_val <- sd(mean_value)
+    (mean_value-mean_val/sd_val)}) %>% 
+  dplyr::ungroup()
 
+openxlsx::write.xlsx(file = "./results/to_heatmaps.xlsx", x = clean_data_to_plot_hmaps)
 
-
-
+##### 10 for the barplots
+clean_data_to_plot_barplots <- sample_data %>% 
+  # remove bad data
+  dplyr::filter(qc_flag == "GOOD") %>%
+  dplyr::select(-qc_flag) %>% 
+  dplyr::ungroup()
+  
