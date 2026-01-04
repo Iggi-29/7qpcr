@@ -6,6 +6,11 @@
 # setwd("/home/labs/eclab/ijarne/Desktop/") ## work
 setwd("/home/ignasi/Documents/7qpcr") ## home
 
+### Check and if the  results folder doesn't exist, generate it
+if (!dir.exists("./results/new")) {
+  dir.create(path = "./results/new")
+}
+
 ### libraries
 library(readr)
 library(openxlsx)
@@ -56,12 +61,28 @@ expand_df <- function(df, sup_col = "") {
   
   return(expanded_df)
   }
+# run test function
+run_test <- function(df, value_col, test_type) {
+  x <- df[[value_col]]
+  g <- df$sample_group
+  
+  if (length(unique(g)) < 2 || length(x) < 2)
+    return(NA_real_)
+  
+  if (test_type == "ttest") {
+    final_pval <- t.test(x ~ g,)$p.value
+  } else {
+    final_pval <- wilcox.test(x ~ g,)$p.value
+  }
+  return(final_pval)
+}
 
 ### Constants
 ## data placement
 raw_data_file <- c("./raw_data_to_play/20251212_SPOCK1_DN-TRES.txt")
 sample_location <- c("./raw_data_to_play/sample_location.xlsx")
 gene_location <- c("./raw_data_to_play/gene_location.xlsx")
+meta_data_location <- "./raw_data_to_play/meta_data.xlsx"
 
 ## control group
 control_group <- "DN"
@@ -69,11 +90,20 @@ control_group <- "DN"
 ## Housekeeping genes
 genes_housekeeping <- c("RHOA")
 
-## value for bad sample and bad value
+## value for bad replicate and bad value
 value_for_bad_replicate <- 35
 value_for_bad_value <- 0.5
+
+## perform the barplots
+perform_barplots <- TRUE
+
 ## permited dispersion at the sample level
 permited_dispersion <- 3
+
+## for the test or wilcoxon test 
+test_type <- "ttest"
+alpha <- 0.05
+value_col <- "deltaCT"
 
 ### Data importation
 ## raw txt data
@@ -101,6 +131,9 @@ gene_location <- lapply(X = gene_location, FUN = function(x) {
   return(element_now)
 })
 gene_location <- do.call(rbind, gene_location)
+## meta_data
+meta_data <- openxlsx::read.xlsx(xlsxFile = meta_data_location)
+
 
 ### Genes work
 ## Genes location
@@ -214,12 +247,19 @@ raw_data <- raw_data %>%
   dplyr::mutate(
     hk_mean_value = mean(mean_value[type_of_gene == "HK"],
                          na.rm = TRUE),
-    deltaCT = mean_value-hk_mean_value) %>%
+    deltaCT = mean_value/hk_mean_value) %>%
   dplyr::ungroup()
 
-openxlsx::write.xlsx(file = "./results/raw_data_replicate_level.xlsx", x = raw_data)
+raw_data <- merge(x = raw_data, y = meta_data,
+                  by.x = "replicate_name", by.y = "sample")
+raw_data <- raw_data %>% 
+  dplyr::relocate(zscoring_group, subgroup, testing_group, .after = replicate_name) %>% 
+  dplyr::relocate(file_name, .after = -1)
 
-#### 7 delta deltaCT
+openxlsx::write.xlsx(file = "./results/new/raw_data_replicate_level.xlsx", 
+                     x = raw_data)
+
+#### 7 sample level data
 sample_data <- raw_data %>% 
   # remove non wanted columns
   dplyr::select(-c(file_name,Pos,replicate_name,Cp,good_replicate,comparison_results,keep_this_value,mean_value,sd_value,hk_mean_value)) %>% 
@@ -228,42 +268,71 @@ sample_data <- raw_data %>%
   dplyr::select(-type_of_gene) %>% 
   # keep only sample level data so remove duplicates
   dplyr::distinct() %>% 
-  # add sample group and cell line info
-  dplyr::rowwise() %>% 
-  dplyr::mutate(sample_group = ifelse(grepl(pattern = control_group, x = sample_name),"Control","Quest"),
-                cell_line = strsplit(x = sample_name, split = "\\.")[[1]][1]) %>%
-  dplyr::ungroup() %>% 
-  dplyr::relocate(cell_line, sample_group, .after = sample_name) %>% 
-  # dp the delta delta CT calculation
-  dplyr::group_by(sample_name, Gene) %>% 
-  dplyr::mutate(deltaCT_mean = mean(deltaCT)) %>% 
-  dplyr::ungroup() %>% 
-  dplyr::group_by(cell_line,Gene) %>% 
-  dplyr::mutate(delta_delta_CT = deltaCT - mean(deltaCT_mean[sample_group == "Control"])) %>% 
-  dplyr::ungroup() %>% 
-  # calculate elevated value
-  dplyr::mutate(elevated_value = 2^-delta_delta_CT) %>% 
-  dplyr::select(-c(deltaCT_mean)) %>% 
-  # check outliers of elevated value
-  dplyr::group_by(cell_line, sample_group, Gene) %>%
+  # check for outliers on deltaCT values
+  dplyr::group_by(subgroup, Gene) %>%
   dplyr::mutate(
-    mean_others = map_dbl(seq_along(elevated_value), function(i) {
-      others <- elevated_value[-i]
+    mean_others = map_dbl(seq_along(deltaCT), function(i) {
+      others <- deltaCT[-i]
       if (length(others) >= 1) mean(others, na.rm = TRUE) else NA_real_
     }),
-    sd_others = map_dbl(seq_along(elevated_value), function(i) {
-      others <- elevated_value[-i]
+    sd_others = map_dbl(seq_along(deltaCT), function(i) {
+      others <- deltaCT[-i]
       if (length(others) >= 2) sd(others, na.rm = TRUE) else NA_real_
     }),
     qc_flag = ifelse(
       !is.na(sd_others) &
-        abs(elevated_value - mean_others) > permited_dispersion * sd_others,
+        abs(deltaCT - mean_others) > permited_dispersion * sd_others,
       "BAD",
       "GOOD"
     )
   ) %>%
+  dplyr::ungroup()
+
+openxlsx::write.xlsx(file = "./results/new/raw_sample_data.xlsx",
+                     x = sample_data)
+
+
+### 8 zscore the data for the hmap
+sample_data_zscore <- sample_data %>% 
+  # remove BAD data and remove sd_others and mean_others
+  dplyr::filter(qc_flag == "GOOD") %>%
+  dplyr::select(-c(mean_others, sd_others,qc_flag)) %>%
+  # calculate mean_value
+  dplyr::group_by(sample_name,Gene) %>% 
+  dplyr::mutate(mean_value = mean(deltaCT)) %>% 
   dplyr::ungroup() %>% 
-  # calculate the mean and sd values of good delta scores
+  dplyr::select(-c(deltaCT)) %>%
+  dplyr::distinct() %>% 
+  # zscore the values
+  dplyr::group_by(zscoring_group,Gene) %>% 
+  dplyr::mutate(z_scored_deltaCT = {
+    mean_val <- mean(mean_value)
+    sd_val <- sd(mean_value)
+    (mean_value-mean_val)/sd_val}) %>%
+  dplyr::ungroup()
+
+openxlsx::write.xlsx(file = "./results/new/zscored_values.xlsx", 
+                     x = sample_data_zscore)
+
+### 9 generate the data for t tests
+
+### 10 do the statistical tests
+
+### 11 Generate the final 
+
+#### 7 delta deltaCT
+sample_data <- raw_data %>% 
+  ## dp the delta delta CT calculation OJO
+  dplyr::group_by(sample_name, Gene) %>% 
+  dplyr::mutate(deltaCT_mean = mean(deltaCT)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::group_by(cell_line,Gene) %>% 
+  dplyr::mutate(delta_delta_CT = deltaCT - mean(deltaCT_mean[sample_group == control_group])) %>% 
+  dplyr::ungroup() %>% 
+  ## calculate elevated value OJO
+  dplyr::mutate(elevated_value = 2^-delta_delta_CT) %>% 
+  dplyr::select(-c(deltaCT_mean)) %>% 
+  ## calculate the mean and sd values of good delta scores OJO
   dplyr::group_by(cell_line,sample_group,Gene) %>%
   dplyr::mutate(mean_value = mean(elevated_value[qc_flag == "GOOD"]),
                 sd_value = sd(elevated_value[qc_flag == "GOOD"])) %>% 
@@ -281,28 +350,35 @@ sample_data <- sample_data %>%
   dplyr::select(-row_in_group) %>% 
   dplyr::arrange(sample_name,sample_group,Gene)
 
-openxlsx::write.xlsx(file = "./results/raw_sample_data.xlsx", x = sample_data)
-
-##### 9 do the zscore calculations of deltaCT
-clean_data_to_plot_hmaps <- sample_data %>% 
-  # remove bad data and not useful columns
-  dplyr::select(-qc_flag) %>% 
-  dplyr::filter(!is.na(mean_value)) %>% 
-  dplyr::select(sample_name, cell_line,Gene, sample_group, mean_value) %>%
-  # calculate the zscore
-  dplyr::group_by(cell_line,Gene) %>% 
-  dplyr::mutate(z_scored_deltaCT = {
-    mean_val <- mean(mean_value)
-    sd_val <- sd(mean_value)
-    (mean_value-mean_val/sd_val)}) %>% 
-  dplyr::ungroup()
-
-openxlsx::write.xlsx(file = "./results/to_heatmaps.xlsx", x = clean_data_to_plot_hmaps)
+openxlsx::write.xlsx(file = "./results/new/raw_sample_data.xlsx", 
+                     x = sample_data)
 
 ##### 10 for the barplots
 clean_data_to_plot_barplots <- sample_data %>% 
-  # remove bad data
+  # remove bad data and nor useful columns
   dplyr::filter(qc_flag == "GOOD") %>%
   dplyr::select(-qc_flag) %>% 
+  dplyr::select(sample_name, cell_line, Gene, sample_group, deltaCT, elevated_value) %>% 
+  # do the mean and  sd_calculation again
+  dplyr::group_by(cell_line,sample_group,Gene) %>% 
+  dplyr::mutate(mean_value = mean(elevated_value),
+                sd_value = sd(elevated_value)) %>% 
   dplyr::ungroup()
+openxlsx::write.xlsx(file = "./results/new/barplot_data.xlsx",
+                     x = clean_data_to_plot_barplots)
+
+##### 11 do the ttests
+tt_results <- clean_data_to_plot_barplots %>%
+  dplyr::group_by(cell_line, Gene) %>%
+  dplyr::summarise(p_value = run_test(
+    df = dplyr::cur_data(),
+    value_col =  value_col,
+    test_type = test_type
+  ), .groups = "drop") %>% 
+  dplyr::ungroup()
+
+openxlsx::write.xlsx(file = "./results/new/statistics_result.xlsx",
+                     x = tt_results)
+
   
+##### Generate a dataframe with all the information
