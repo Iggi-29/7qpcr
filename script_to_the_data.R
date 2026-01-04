@@ -242,10 +242,10 @@ bio_rep_data <- bio_rep_data %>%
 
 bio_rep_data_red <- bio_rep_data %>% 
   dplyr::group_by(sample_name, Gene) %>% 
-  dplyr:: mutate(normalized_expression_mean = mean(normalized_expression),
-                 log2_expression_value_mean = mean(log2_expression_value)) %>% 
-  dplyr::mutate(normalized_expression_sd = sd(normalized_expression),
-                log2_expression_value_sd = sd(log2_expression_value)) %>% 
+  dplyr:: mutate(normalized_expression_mean = mean(normalized_expression[qc_flag == "GOOD"]),
+                 log2_expression_value_mean = mean(log2_expression_value[qc_flag == "GOOD"])) %>% 
+  dplyr::mutate(normalized_expression_sd = sd(normalized_expression[qc_flag == "GOOD"]),
+                log2_expression_value_sd = sd(log2_expression_value[qc_flag == "GOOD"])) %>% 
   dplyr::ungroup() %>% 
   dplyr::select(c(file_name,Pos,sample_name,zscoring_group,testing_group,
                   Gene, type_of_gene,
@@ -255,6 +255,8 @@ bio_rep_data_red <- bio_rep_data %>%
 
 ##### 10 reconstruct the dataset
 ttest_ready_data <- bio_rep_data
+ttest_ready_data <- ttest_ready_data %>% 
+  dplyr::filter(qc_flag == "GOOD")
 
 bio_rep_data <- bio_rep_data %>% 
   dplyr::select(c(file_name,zscoring_group,testing_group,Pos,Gene,mean_others,sd_others,qc_flag))
