@@ -23,7 +23,11 @@ library(ggnewscale)
 library(ggbreak)
 
 ### functions
-source("./functions/functions.R")
+source("./functions/expand_cols.R")
+source("./functions/expand_dataframes.R")
+source("./functions/expand_rows.R")
+source("./functions/run_test.R")
+source("./functions/detect _frontiers.R")
 
 ### Constants
 ## data placement
@@ -68,7 +72,7 @@ colour_of_groups <- setNames(colour_of_groups$colour, colour_of_groups$testing_g
 
 ### Recalculate if required
 if (recalcultate) {
-  source("./functions/epp.R")
+  source("./helpers/recalculate.R")
 }
 if ("mean_others" %in% colnames(raw_data)) {
   raw_data <- raw_data %>%

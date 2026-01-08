@@ -20,7 +20,10 @@ library(tidyr)
 library(stringr)
 
 ### functions importation
-source("./functions/functions.R")
+source("./functions/expand_cols.R")
+source("./functions/expand_dataframes.R")
+source("./functions/expand_rows.R")
+source("./functions/run_test.R")
 
 ### Constants
 ## data placement
