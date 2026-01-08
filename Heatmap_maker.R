@@ -1,106 +1,23 @@
-################################################
-## Zscore qPCR results and generate a heatmap ##
-################################################
+ 
+### Read the data
+heatmap_data <- openxlsx::read.xlsx(xlsxFile = heatmap_data_file)
+gene_annotation <- openxlsx::read.xlsx(xlsxFile = gene_annotation_file)
 
-### libraries and WD
-library(dplyr)
-library(tidyr)
-library(readxl)
-# if (!require("BiocManager", quietly = TRUE))
-#   install.packages("BiocManager")
-# 
-# BiocManager::install("ComplexHeatmap")
-library(ComplexHeatmap)
+## some useful functions
+# expand cols
 
-# setwd("/Users/ltorres/Desktop/")
-setwd("/home/ignasi/Desktop/heatmaps/")
-
+### Generate general objects for heatmap
 # color palette for the heatmap
-colours_of_allota <- c("#FFF5F5","#F7DADA", 
-                       "#EEBFBF","#E6A3A3",
-                       "#DD8888","#D56D6D", 
-                       "#CC5252","#C43636",
-                       "#BB1B1B","#B30000")
-
-
 colours_of_allota <- c(
-  "#FFF5F5",
-  "#F7E3E3",
-  "#EEC6C6",
-  "#E6AAAA",
-  "#DD8E8E",
-  "#D57171",
-  "#CC5555",
-  "#C43939",
-  "#BB1C1C",
-  "#B30000"
-)
-### read the data
-sheet_names <- readxl::excel_sheets(path = "./data/Z-Score DTPs.xlsx")
-raw_data <- lapply(X = sheet_names, FUN = function(x) {
-  readxl::read_xlsx(path = "./data/Z-Score DTPs.xlsx", sheet = x)})
-names(raw_data) <- sheet_names
+  "#FFF5F5","#F7E3E3",
+  "#EEC6C6","#E6AAAA",
+  "#DD8E8E","#D57171",
+  "#CC5555","#C43939",
+  "#BB1C1C","#B30000")
 
-# clean colnames just in case ... this shall be removed maybe .. but it is not
-# necessary
-for (i in 1:length(raw_data)) {
-  names_now <- names(raw_data)[i]
-  raw_data_now <- raw_data[[i]]
+# color of genes
 
-  colnames(raw_data_now) <- gsub(pattern = "\\.\\.\\.",
-                                 replacement = "_R_",
-                                 x = colnames(raw_data_now))
-  names(raw_data)[i] <- names_now
-  raw_data[[i]] <- raw_data_now}
-
-
-zscored_list <- list()
-## zscore in a very easy way
-for (i in 1:length(raw_data)) {
-  names_now <- names(raw_data)[i]
-  raw_data_now <- raw_data[[i]]
-  
-  # to long format
-  raw_data_now_long <- tidyr::pivot_longer(
-    data = raw_data_now,
-    cols = colnames(raw_data_now)[2:ncol(raw_data_now)],
-    values_to = "qvalue", names_to = "sample_name")
-  
-  # remove NAs
-  raw_data_now_long <- raw_data_now_long %>% 
-    dplyr::filter(!is.na(qvalue))
-  
-  # detect min value
-  raw_data_now_long <- raw_data_now_long %>% 
-    dplyr::mutate(qvalue = ifelse(qvalue == min(raw_data_now_long$qvalue),NA,qvalue))
-  
-  # replcates into samples
-  raw_data_now_long <- raw_data_now_long %>% 
-    dplyr::rowwise() %>% 
-    dplyr::mutate(sample_name = gsub(pattern = "_.*", replacement = "", x = sample_name)) %>% 
-    dplyr::ungroup() %>% 
-    dplyr::group_by(GENES,sample_name) %>% 
-    dplyr::mutate(mean_qvalue = mean(qvalue)) %>% 
-    dplyr::ungroup() %>% 
-    dplyr::select(-qvalue) %>% 
-    dplyr::rename(qvalue = mean_qvalue) %>% 
-    dplyr::distinct()
-  
-  # zscore values
-  zscored_values <- raw_data_now_long %>%
-    # calculate the mean and sd values
-    dplyr::group_by(GENES) %>%
-    dplyr::mutate(mean_val = mean(qvalue, na.rm = T),
-                  sd_val = sd(qvalue, na.rm = T)) %>%
-    dplyr::ungroup() %>%
-    # calculate the zscore
-    dplyr::rowwise() %>% 
-    dplyr::mutate(zscore_value = (qvalue-mean_val)/sd_val) %>% 
-    dplyr::ungroup()
-  
-  zscored_list[[i]] <- zscored_values
-  names(zscored_list)[i] <- names_now
-  }
+# order of the data
 
 ## do the heatmaps
 for (i in 1:length(zscored_list)) {

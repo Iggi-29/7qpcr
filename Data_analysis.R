@@ -395,7 +395,7 @@ if (perform_test)  {
       df = pick(everything()),
       value_col = "normalized_expression",
       group_col = "testing_group",
-      test_type = test_type)) %>%
+      test_type = test_type), .groups = "drop") %>%
     dplyr::ungroup()
   
   openxlsx::write.xlsx(file = "./results/statistical_results.xlsx", 

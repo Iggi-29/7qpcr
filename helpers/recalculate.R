@@ -82,7 +82,7 @@ ttest_ready_data <- ttest_ready_data %>%
     df = pick(everything()),
     value_col = "normalized_expression",
     group_col = "testing_group",
-    test_type = test_type)) %>%
+    test_type = test_type), .groups = "drop") %>%
   dplyr::ungroup()
 
 raw_data2 <- raw_data2 %>% 
